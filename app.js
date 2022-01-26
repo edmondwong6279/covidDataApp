@@ -29,58 +29,44 @@
 // path  /active
 // query ?country=Albania&date=2021-12-01
 
-// set up server (localhost). We can try each get request by navigating to localhost:PORT/path?query so for example
+// set up server (localhost). We can try each get request by navigating to localhost:PORT/path?query so for examples
 // localhost:3000/deaths?date=2022-01-01
 
-// 1. Implement with no query, just path. So we can see TOTAL numbers for each of the interested fields.
-// 2. Add in some query string stuff for subsequent fields
+// TODO:
+//  1. Fetch and parse the CSV once at the start instead of every api request:
+//      a. Cache a large object and store them everytime we get some resource?
+//      b. Each get method will need to check if the full path+query is already in the cache.
 
-
-const http = require('http');
 const https = require('https');
-const url = require('url');
-const querystring = require('querystring');
 const Papa = require('papaparse');
+const express = require('express');
+// npm i node-fetch@2
+const fetch = require('node-fetch');
 
 const port = 3000;
 
-// create non-secure http server so we can easily access localhost
-const server = http.createServer((req, res) => {
-    const { method } = req;
-    switch(method){
-        case 'GET':
-            return handleGetRequest(req,res);
-        default:
-            throw new Error(`Unsupported request method ${method}`);
-    }
+// TODO implement a cache
+let cache;
 
-    res.end('Server is running!');
-});
+// creates an Express application
+const server = express();
 
-const handleGetRequest = (request,response) => {
-    // Separate the request information here:
-    const splitUrl = request.url.split('?');
-    const path = splitUrl[0];
-    const querystr = splitUrl[1];
-    const query = querystring.parse(querystr);
-
-    if (query['date'] === undefined){
-        response.statusCode = 404;
-        response.end('Must define date in query e.g. ?date=01-01-2022');
+// http methods are per method instead of in the .createServer method
+// We should use regular expressions to make sure our path is valid and it includes a date in the query
+server.get(/\b(deaths|confirmed-cases|active|recovered)\b/,(req,res) => {
+    // This regex seems to let through paths like /deaths/active. However, we deal with this in
+    // the switch statement below.
+    console.log('GET method requested');
+    if (req.query.date === undefined) {
+        console.log('NO DATE PROVIDED ')
+        res.statusCode = 404;
+        res.end('Must define date in query e.g. ?date=01-01-2022');
         return;
     }
 
-    const options = {
-      hostname: 'raw.githubusercontent.com',
-      path: '/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_daily_reports/',
-      method: 'GET',
-      headers: {
-        'Content-Type': 'text/csv'
-      }
-    }
     let index;
 
-    switch (path){
+    switch (req._parsedUrl.pathname){
         case '/confirmed-cases':
             index = 7;
             break;
@@ -94,45 +80,35 @@ const handleGetRequest = (request,response) => {
             index = 9;
             break;
         default:
-            response.statusCode = 404;
-            response.end('Must define a valid path e.g. /deaths');
+            res.statusCode = 404;
+            res.send('Must define a valid path e.g. /deaths');
             return;
         }
 
-        // PRECONDITION: Need the date before making the request as each csv is named by date.
-        options['path'] += query['date']+'.csv'
+    const fullUrl = "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_daily_reports/" + req.query.date + '.csv';
+    // TODO is this the correct way to use the fetch api? Can't just assign it as data and then deal with it after
+    // as fetch returns a promise, and we cannot await because we are dealing with everything inside .get which is
+    // not an async function.
+    fetch(fullUrl).then(
+        res1 => res1.text()).then(
+        res2 => {
+            data = res2;
+            const parsedCSV = Papa.parse(data)['data'];
+            let total = 0;
+            queryCountry = req.query.country;
 
-        const req = https.request(options, res => {
-            let dataIn = '';
-            res.on('data', (newData) => {
-                dataIn += newData;
-            });
-
-            res.on('end',  () => {
-                const parsedCSV = Papa.parse(dataIn)['data'];
-                let total = 0;
-
-                queryCountry = query['country'];
-
-                for (let i=1; i < parsedCSV.length; i++){
-                    let current = parseInt(parsedCSV[i][index]);
-                    let country = parsedCSV[i][3];
-
-                    // Some numbers are missing so we only add the valid ones.
-                    // Also, only sum if there is no country specified, or if it IS the country specified.
-                    if (!isNaN(current) && (queryCountry === undefined || queryCountry === country)){
-                        total += current;
-                    }
+            const reducer = (prev,curr) => {
+                current = parseInt(curr[index]);
+                if ((queryCountry === undefined || queryCountry === curr[3]) && !isNaN(current)) {
+                    total += current;
                 }
-                response.end(total.toString());
-            });
+            };
+            parsedCSV.reduce(reducer);
+            res.send(total.toString());
+            console.log('Successfully responded.')
         })
-        req.end()
-        console.log('Successfully responded.')
-
-}
+})
 
 server.listen(port, () => {
-    const { address, port } = server.address();
-    console.log(`Server listening at ${address} on port ${port}`)
+    console.log(`Server listening on port ${port}`)
 });
