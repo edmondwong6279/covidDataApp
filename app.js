@@ -37,7 +37,6 @@
 //      a. Cache a large object and store them everytime we get some resource?
 //      b. Each get method will need to check if the full path+query is already in the cache.
 
-const https = require('https');
 const Papa = require('papaparse');
 const express = require('express');
 // npm i node-fetch@2
