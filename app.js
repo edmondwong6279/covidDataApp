@@ -50,64 +50,44 @@ let cache;
 // creates an Express application
 const server = express();
 
-// http methods are per method instead of in the .createServer method
-// We should use regular expressions to make sure our path is valid and it includes a date in the query
-server.get(/\b(deaths|confirmed-cases|active|recovered)\b/,(req,res) => {
-    // This regex seems to let through paths like /deaths/active. However, we deal with this in
-    // the switch statement below.
+server.get('/deaths',          (req,res)=>handle(8, req,res));
+server.get('/confirmed-cases', (req,res)=>handle(7, req,res));
+server.get('/active',          (req,res)=>handle(10,req,res));
+server.get('/recovered',       (req,res)=>handle(9, req,res));
+
+const summariser = async (req,res,date,id) => {
+    const fullUrl = "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_daily_reports/" + req.query.date + '.csv';
+    const res1 = await fetch(fullUrl);
+    const res2 = await res1.text();
+    const parsedCSV = Papa.parse(res2)['data'];
+    queryCountry = req.query.country;
+
+    const reducer = (prev,curr) => {
+        current = parseInt(curr[id]);
+        if ((queryCountry === undefined || queryCountry === curr[3]) && !isNaN(current)) {
+            prev += current;
+        }
+        return prev;
+    };
+
+    // initial value of 0
+    const total = parsedCSV.reduce(reducer,0);
+    res.send(total.toString());
+    console.log('Successfully responded.')
+    return;
+}
+
+const handle = (id, req, res) => {
     console.log('GET method requested');
     if (req.query.date === undefined) {
         console.log('NO DATE PROVIDED ')
         res.statusCode = 404;
-        res.end('Must define date in query e.g. ?date=01-01-2022');
-        return;
+        res.send('Must define date in query e.g. ?date=01-01-2022');
+    } else {
+        summariser(req,res, req.query.date, id);
     }
-
-    let index;
-
-    switch (req._parsedUrl.pathname){
-        case '/confirmed-cases':
-            index = 7;
-            break;
-        case '/deaths':
-            index = 8;
-            break;
-        case '/active':
-            index = 10;
-            break;
-        case '/recovered':
-            index = 9;
-            break;
-        default:
-            res.statusCode = 404;
-            res.send('Must define a valid path e.g. /deaths');
-            return;
-        }
-
-    const fullUrl = "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_daily_reports/" + req.query.date + '.csv';
-    // TODO is this the correct way to use the fetch api? Can't just assign it as data and then deal with it after
-    // as fetch returns a promise, and we cannot await because we are dealing with everything inside .get which is
-    // not an async function.
-    fetch(fullUrl).then(
-        res1 => res1.text()).then(
-        res2 => {
-            data = res2;
-            const parsedCSV = Papa.parse(data)['data'];
-            let total = 0;
-            queryCountry = req.query.country;
-
-            const reducer = (prev,curr) => {
-                current = parseInt(curr[index]);
-                if ((queryCountry === undefined || queryCountry === curr[3]) && !isNaN(current)) {
-                    total += current;
-                }
-            };
-            parsedCSV.reduce(reducer);
-            res.send(total.toString());
-            console.log('Successfully responded.')
-        })
-})
+}
 
 server.listen(port, () => {
-    console.log(`Server listening on port ${port}`)
+    console.log(`Server listening on port ${port}`);
 });
